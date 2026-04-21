@@ -2,8 +2,12 @@ const { Pool } = require('pg');
 const logger = require('../utils/logger');
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  host: process.env.DB_HOST,
+  port: parseInt(process.env.DB_PORT) || 5432,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  ssl: false 
 });
 
 pool.on('error', (err) => {
@@ -11,13 +15,8 @@ pool.on('error', (err) => {
 });
 
 const query = async (text, params) => {
-  const start = Date.now();
   try {
     const res = await pool.query(text, params);
-    const duration = Date.now() - start;
-    if (duration > 1000) {
-      logger.warn(`Query lenta (${duration}ms): ${text}`);
-    }
     return res;
   } catch (err) {
     logger.error('Database query error:', err);

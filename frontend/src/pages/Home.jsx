@@ -118,7 +118,7 @@ export default function Home() {
           borderRadius: 'var(--radius-lg)', padding: '10px 16px',
           boxShadow: 'var(--shadow-sm)', transition: 'border-color var(--transition)'
         }}
-          onFocus={() => {}} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: query ? '2px solid var(--verde)' : '2px solid var(--gris-200)', borderRadius: 'var(--radius-lg)', padding: '10px 16px', boxShadow: 'var(--shadow-sm)' }}>
+          onFocus={() => {}}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gris-400)" strokeWidth="2.5">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>

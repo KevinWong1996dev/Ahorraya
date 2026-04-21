@@ -13,6 +13,7 @@ const cartRoutes = require('./routes/cart');
 const contributionRoutes = require('./routes/contributions');
 const alertRoutes = require('./routes/alerts');
 const supermercadoRoutes = require('./routes/supermercados');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -50,6 +51,7 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/contributions', contributionRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/supermercados', supermercadoRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
