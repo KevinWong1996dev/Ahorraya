@@ -1,16 +1,18 @@
 {
   "name": "ahorraya-backend",
   "version": "1.0.0",
-  "description": "API Backend para AhorraYa",
+  "description": "API Backend para AhorraYa - Comparador de precios Ecuador",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "db:migrate": "node src/database/migrate.js",
     "db:seed": "node src/database/seed.js",
+    "scrapers:run": "node src/scrapers/index.js",
     "db:migrate:admin": "node src/database/migrate_admin.js",
     "db:seed:admin": "node src/database/seed_admin.js",
-    "scrapers:run": "node src/scrapers/index.js"
+    "db:migrate:categorias": "node src/database/migrate_categorias.js",
+    "db:fix": "node src/database/migrate_fix.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

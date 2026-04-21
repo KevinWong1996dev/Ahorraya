@@ -5,90 +5,138 @@ import { adminAPI } from '../../services/adminApi';
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [logs, setLogs] = useState([]);
+  const [categorias, setCategorias] = useState([]);
+  const [nuevaCat, setNuevaCat] = useState('');
+  const [catLoading, setCatLoading] = useState(false);
+  const [catMsg, setCatMsg] = useState('');
 
   useEffect(() => {
-    adminAPI.stats().then(r => setStats(r.data)).catch(() => {});
-    adminAPI.getLogs().then(r => setLogs(r.data.slice(0, 8))).catch(() => {});
+    adminAPI.stats().then(r => { setStats(r.data); setCategorias(r.data.categorias||[]); }).catch(()=>{});
+    adminAPI.getLogs().then(r => setLogs(r.data.slice(0,6))).catch(()=>{});
+    adminAPI.getCategorias().then(r => setCategorias(r.data.map(c=>({id:c.id,nombre:c.nombre})))).catch(()=>{});
   }, []);
 
+  const handleAddCat = async (e) => {
+    e.preventDefault();
+    if (!nuevaCat.trim()) return;
+    setCatLoading(true); setCatMsg('');
+    try {
+      const res = await adminAPI.createCategoria(nuevaCat.trim());
+      setCategorias(prev => [...prev, { id: res.data.id, nombre: res.data.nombre }].sort((a,b)=>a.nombre.localeCompare(b.nombre)));
+      setNuevaCat('');
+      setCatMsg('✅ Categoría agregada');
+      setTimeout(()=>setCatMsg(''), 2000);
+    } catch (err) {
+      setCatMsg('❌ ' + (err.response?.data?.error || 'Error'));
+    } finally { setCatLoading(false); }
+  };
+
+  const handleDeleteCat = async (id, nombre) => {
+    if (!confirm(`¿Eliminar categoría "${nombre}"?`)) return;
+    try {
+      await adminAPI.deleteCategoria(id);
+      setCategorias(prev => prev.filter(c => c.id !== id));
+    } catch (err) {
+      alert('Error al eliminar: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
   const STAT_CARDS = [
-    { label: 'Productos', value: stats?.productos, icon: '🛍️', color: '#4ade80', bg: '#f0fdf4', path: '/admin/productos' },
-    { label: 'Usuarios', value: stats?.usuarios, icon: '👥', color: '#60a5fa', bg: '#eff6ff', path: '/admin/usuarios' },
-    { label: 'Contribuciones', value: stats?.contribuciones, icon: '📝', color: '#f59e0b', bg: '#fffbeb', path: '/admin/contribuciones' },
-    { label: 'Ofertas activas', value: stats?.ofertas_activas, icon: '🏷️', color: '#f472b6', bg: '#fdf2f8', path: '/admin/productos' },
+    { label:'Productos',    value:stats?.productos,    icon:'🛍️', color:'#4ade80', path:'/admin/productos' },
+    { label:'Usuarios',     value:stats?.usuarios,     icon:'👥', color:'#60a5fa', path:'/admin/usuarios' },
+    { label:'Contribuciones',value:stats?.contribuciones,icon:'📝',color:'#f59e0b',path:'/admin/contribuciones' },
+    { label:'Categorías',   value:categorias.length,   icon:'🏷️', color:'#a78bfa', path:null },
   ];
 
   return (
     <div>
-      <h1 style={{ fontSize: 24, fontWeight: 800, marginBottom: '1.5rem', color: '#0f172a' }}>Dashboard</h1>
+      <h1 style={{ fontSize:24, fontWeight:800, marginBottom:'1.5rem', color:'#0f172a' }}>Dashboard</h1>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: '2rem' }}>
-        {STAT_CARDS.map(s => (
-          <Link key={s.label} to={s.path} style={{ textDecoration: 'none' }}>
-            <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: '1.25rem', cursor: 'pointer', transition: 'box-shadow 0.15s' }}
-              onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{s.label}</span>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>{s.icon}</div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:14, marginBottom:'1.5rem' }}>
+        {STAT_CARDS.map(s => {
+          const inner = (
+            <div style={{ background:'#fff', borderRadius:14, border:'1px solid #e2e8f0', padding:'1.25rem', transition:'box-shadow 0.15s', cursor: s.path?'pointer':'default' }}
+              onMouseEnter={e=>s.path && (e.currentTarget.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)')}
+              onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                <span style={{ fontSize:12, fontWeight:600, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.5px' }}>{s.label}</span>
+                <div style={{ width:36, height:36, borderRadius:10, background:`${s.color}18`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:18 }}>{s.icon}</div>
               </div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: s.color, fontFamily: 'var(--font-display)' }}>
-                {stats ? s.value ?? 0 : '—'}
-              </div>
+              <div style={{ fontSize:32, fontWeight:800, color:s.color, fontFamily:'var(--font-display)' }}>{stats ? (s.value??0) : '—'}</div>
             </div>
-          </Link>
-        ))}
+          );
+          return s.path ? <Link key={s.label} to={s.path} style={{ textDecoration:'none' }}>{inner}</Link> : <div key={s.label}>{inner}</div>;
+        })}
       </div>
 
-      {/* Accesos rápidos */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: '2rem' }}>
-        <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: '1.25rem' }}>
-          <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: '1rem', color: '#0f172a' }}>Acciones rápidas</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[
-              { label: '+ Nuevo producto', path: '/admin/productos?nuevo=1', color: '#4ade80' },
-              { label: '+ Nuevo usuario admin', path: '/admin/usuarios?nuevo=1', color: '#60a5fa' },
-              { label: 'Moderar contribuciones', path: '/admin/contribuciones', color: '#f59e0b' },
-            ].map(a => (
-              <Link key={a.label} to={a.path} style={{
-                display: 'block', padding: '9px 14px', borderRadius: 8, fontSize: 14, fontWeight: 600,
-                color: a.color, background: `${a.color}12`, textDecoration: 'none',
-                border: `1px solid ${a.color}30`
-              }}>{a.label}</Link>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+        {/* ── Gestión de categorías ── */}
+        <div style={{ background:'#fff', borderRadius:14, border:'1px solid #e2e8f0', padding:'1.25rem' }}>
+          <h2 style={{ fontSize:15, fontWeight:700, marginBottom:'1rem', color:'#0f172a' }}>🏷️ Categorías de productos</h2>
+
+          {/* Agregar */}
+          <form onSubmit={handleAddCat} style={{ display:'flex', gap:8, marginBottom:'0.75rem' }}>
+            <input value={nuevaCat} onChange={e=>setNuevaCat(e.target.value)} placeholder="Nueva categoría..."
+              style={{ flex:1, padding:'8px 12px', borderRadius:8, border:'1.5px solid #e2e8f0', fontSize:14 }} />
+            <button type="submit" disabled={catLoading||!nuevaCat.trim()} style={{ padding:'8px 14px', borderRadius:8, background: (!nuevaCat.trim()||catLoading)?'#e2e8f0':'#16a34a', color: (!nuevaCat.trim()||catLoading)?'#94a3b8':'#fff', fontSize:13, fontWeight:700, border:'none', cursor:'pointer', whiteSpace:'nowrap' }}>
+              {catLoading?'...':'+ Agregar'}
+            </button>
+          </form>
+
+          {catMsg && (
+            <div style={{ fontSize:13, padding:'6px 10px', borderRadius:7, marginBottom:'0.75rem', background: catMsg.startsWith('✅')?'#f0fdf4':'#fef2f2', color: catMsg.startsWith('✅')?'#16a34a':'#ef4444' }}>{catMsg}</div>
+          )}
+
+          {/* Lista */}
+          <div style={{ maxHeight:280, overflowY:'auto', display:'flex', flexDirection:'column', gap:4 }}>
+            {categorias.length===0 ? (
+              <div style={{ color:'#94a3b8', fontSize:13, padding:'1rem', textAlign:'center' }}>Sin categorías. Crea la primera.</div>
+            ) : categorias.map(c => (
+              <div key={c.id||c} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 10px', borderRadius:8, background:'#f8fafc', border:'1px solid #f1f5f9' }}>
+                <span style={{ fontSize:13, fontWeight:500, color:'#334155' }}>🏷️ {c.nombre||c}</span>
+                {c.id && (
+                  <button onClick={()=>handleDeleteCat(c.id, c.nombre)} style={{ background:'none', border:'none', cursor:'pointer', color:'#cbd5e1', fontSize:16, padding:'2px 6px', borderRadius:5 }}
+                    onMouseEnter={e=>e.currentTarget.style.color='#ef4444'}
+                    onMouseLeave={e=>e.currentTarget.style.color='#cbd5e1'}>×</button>
+                )}
+              </div>
             ))}
           </div>
         </div>
 
-        {/* Últimos logs */}
-        <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: '1.25rem' }}>
-          <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: '1rem', color: '#0f172a' }}>Actividad reciente</h2>
-          {logs.length === 0 ? (
-            <div style={{ color: '#94a3b8', fontSize: 14 }}>Sin actividad aún</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {logs.map(log => (
-                <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                  <span style={{ fontSize: 14 }}>{getLogEmoji(log.accion)}</span>
-                  <span style={{ color: '#475569', flex: 1 }}>
-                    <strong>{log.admin_nombre || 'Admin'}</strong> — {log.accion}
-                  </span>
-                  <span style={{ color: '#94a3b8', fontSize: 11 }}>
-                    {new Date(log.created_at).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
+        {/* ── Actividad reciente + accesos rápidos ── */}
+        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+          <div style={{ background:'#fff', borderRadius:14, border:'1px solid #e2e8f0', padding:'1.25rem' }}>
+            <h2 style={{ fontSize:15, fontWeight:700, marginBottom:'1rem', color:'#0f172a' }}>⚡ Acciones rápidas</h2>
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {[
+                { label:'+ Nuevo producto',       path:'/admin/productos?nuevo=1', color:'#4ade80' },
+                { label:'+ Nuevo usuario admin',   path:'/admin/usuarios?nuevo=1',  color:'#60a5fa' },
+                { label:'Moderar contribuciones',  path:'/admin/contribuciones',    color:'#f59e0b' },
+                { label:'Ver actividad',           path:'/admin/logs',              color:'#a78bfa' },
+              ].map(a => (
+                <Link key={a.label} to={a.path} style={{ display:'block', padding:'9px 14px', borderRadius:8, fontSize:14, fontWeight:600, color:a.color, background:`${a.color}12`, textDecoration:'none', border:`1px solid ${a.color}30` }}>
+                  {a.label}
+                </Link>
               ))}
             </div>
-          )}
+          </div>
+
+          <div style={{ background:'#fff', borderRadius:14, border:'1px solid #e2e8f0', padding:'1.25rem', flex:1 }}>
+            <h2 style={{ fontSize:15, fontWeight:700, marginBottom:'1rem', color:'#0f172a' }}>📋 Actividad reciente</h2>
+            {logs.length===0 ? (
+              <div style={{ color:'#94a3b8', fontSize:13 }}>Sin actividad aún</div>
+            ) : logs.map(log => (
+              <div key={log.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, marginBottom:8 }}>
+                <span>{log.accion?.includes('CREATE')?'✅':log.accion?.includes('DELETE')?'🗑️':'✏️'}</span>
+                <span style={{ color:'#475569', flex:1 }}><strong>{log.admin_nombre||'Admin'}</strong> — {log.accion}</span>
+                <span style={{ color:'#94a3b8', fontSize:11 }}>{new Date(log.created_at).toLocaleTimeString('es-EC',{hour:'2-digit',minute:'2-digit'})}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
   );
-}
-
-function getLogEmoji(accion) {
-  if (accion?.includes('CREATE')) return '✅';
-  if (accion?.includes('DELETE')) return '🗑️';
-  if (accion?.includes('UPDATE')) return '✏️';
-  return '📋';
 }

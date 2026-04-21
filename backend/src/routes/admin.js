@@ -3,11 +3,10 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { query } = require('../database/db');
 const { authenticateToken, requireAdmin, requireSuperAdmin } = require('../middleware/auth');
+const logger = require('../utils/logger');
 
-// Todos los endpoints requieren auth + admin
 router.use(authenticateToken, requireAdmin);
 
-// Logging helper
 async function logAction(adminId, accion, entidad, entidad_id, detalle) {
   try {
     await query(
@@ -17,41 +16,81 @@ async function logAction(adminId, accion, entidad, entidad_id, detalle) {
   } catch (e) {}
 }
 
-// ─── DASHBOARD STATS ───────────────────────────────────────────────
+// ─── STATS ────────────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
   try {
-    const [productos, users, contribuciones, ofertas] = await Promise.all([
+    const [productos, users, contribuciones, ofertas, categorias] = await Promise.all([
       query('SELECT COUNT(*) FROM productos'),
       query('SELECT COUNT(*) FROM users'),
       query('SELECT COUNT(*) FROM contribuciones'),
-      query('SELECT COUNT(*) FROM precios WHERE descuento_porcentaje > 0')
+      query('SELECT COUNT(*) FROM precios WHERE descuento_porcentaje > 0'),
+      query('SELECT nombre FROM categorias ORDER BY nombre')
     ]);
     res.json({
       productos: parseInt(productos.rows[0].count),
       usuarios: parseInt(users.rows[0].count),
       contribuciones: parseInt(contribuciones.rows[0].count),
-      ofertas_activas: parseInt(ofertas.rows[0].count)
+      ofertas_activas: parseInt(ofertas.rows[0].count),
+      categorias: categorias.rows.map(r => r.nombre)
     });
   } catch (err) {
     res.status(500).json({ error: 'Error al obtener stats' });
   }
 });
 
-// ─── PRODUCTOS ─────────────────────────────────────────────────────
+// ─── CATEGORÍAS ───────────────────────────────────────────────────
+router.get('/categorias', async (req, res) => {
+  try {
+    const result = await query('SELECT * FROM categorias ORDER BY nombre');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener categorías' });
+  }
+});
+
+router.post('/categorias', async (req, res) => {
+  try {
+    const { nombre } = req.body;
+    if (!nombre?.trim()) return res.status(400).json({ error: 'Nombre requerido' });
+    const result = await query(
+      `INSERT INTO categorias (nombre) VALUES ($1) ON CONFLICT (nombre) DO NOTHING RETURNING *`,
+      [nombre.trim()]
+    );
+    if (result.rows.length === 0) return res.status(409).json({ error: 'Categoría ya existe' });
+    await logAction(req.userId, 'CREATE_CATEGORIA', 'categoria', result.rows[0].id, { nombre });
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al crear categoría' });
+  }
+});
+
+router.delete('/categorias/:id', async (req, res) => {
+  try {
+    await query('DELETE FROM categorias WHERE id = $1', [req.params.id]);
+    res.json({ mensaje: 'Categoría eliminada' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al eliminar categoría' });
+  }
+});
+
+// ─── PRODUCTOS ────────────────────────────────────────────────────
 router.get('/productos', async (req, res) => {
   try {
-    const { q, page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
-    let sql = `SELECT p.*, 
-      (SELECT COUNT(*) FROM precios WHERE producto_id = p.id) as num_precios,
-      (SELECT MIN(precio) FROM precios WHERE producto_id = p.id) as precio_min
-      FROM productos p`;
+    const { q, page = 1, limit = 15 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
     const params = [];
-    if (q) { sql += ` WHERE p.nombre ILIKE $1`; params.push(`%${q}%`); }
-    sql += ` ORDER BY p.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    let where = '';
+    if (q) { where = 'WHERE p.nombre ILIKE $1'; params.push(`%${q}%`); }
+    const sql = `
+      SELECT p.*,
+        (SELECT COUNT(*) FROM precios WHERE producto_id = p.id) as num_precios,
+        (SELECT MIN(precio) FROM precios WHERE producto_id = p.id) as precio_min
+      FROM productos p ${where}
+      ORDER BY p.created_at DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(parseInt(limit), offset);
     const result = await query(sql, params);
-    const countRes = await query(`SELECT COUNT(*) FROM productos${q ? ' WHERE nombre ILIKE $1' : ''}`, q ? [`%${q}%`] : []);
+    const countRes = await query(`SELECT COUNT(*) FROM productos p ${where}`, params.slice(0, -2));
     res.json({ data: result.rows, total: parseInt(countRes.rows[0].count) });
   } catch (err) {
     res.status(500).json({ error: 'Error al obtener productos' });
@@ -66,12 +105,13 @@ router.post('/productos', async (req, res) => {
     const result = await query(
       `INSERT INTO productos (nombre, nombre_normalizado, categoria, subcategoria, marca, codigo_barras, imagen_url, descripcion, unidad, peso_neto)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [nombre, nombre_normalizado, categoria, subcategoria, marca, codigo_barras, imagen_url, descripcion, unidad, peso_neto]
+      [nombre, nombre_normalizado, categoria, subcategoria, marca, codigo_barras || null, imagen_url, descripcion, unidad, peso_neto]
     );
     await logAction(req.userId, 'CREATE', 'producto', result.rows[0].id, { nombre });
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: 'Error al crear producto' });
+    logger.error('Error crear producto:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -84,28 +124,35 @@ router.put('/productos/:id', async (req, res) => {
       `UPDATE productos SET nombre=$1, nombre_normalizado=$2, categoria=$3, subcategoria=$4,
        marca=$5, codigo_barras=$6, imagen_url=$7, descripcion=$8, unidad=$9, peso_neto=$10, updated_at=NOW()
        WHERE id=$11 RETURNING *`,
-      [nombre, nombre_normalizado, categoria, subcategoria, marca, codigo_barras, imagen_url, descripcion, unidad, peso_neto, id]
+      [nombre, nombre_normalizado, categoria, subcategoria, marca, codigo_barras || null, imagen_url, descripcion, unidad, peso_neto, id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Producto no encontrado' });
     await logAction(req.userId, 'UPDATE', 'producto', id, { nombre });
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: 'Error al actualizar producto' });
+    logger.error('Error actualizar producto:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
 router.delete('/productos/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    // Borrar en orden para respetar foreign keys
+    await query('DELETE FROM historial_precios WHERE producto_id = $1', [id]);
+    await query('DELETE FROM contribuciones WHERE producto_id = $1', [id]);
+    await query('DELETE FROM alertas WHERE producto_id = $1', [id]);
+    await query('DELETE FROM precios WHERE producto_id = $1', [id]);
     await query('DELETE FROM productos WHERE id = $1', [id]);
     await logAction(req.userId, 'DELETE', 'producto', id, {});
     res.json({ mensaje: 'Producto eliminado' });
   } catch (err) {
-    res.status(500).json({ error: 'Error al eliminar producto' });
+    logger.error('Error borrar producto:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ─── PRECIOS ───────────────────────────────────────────────────────
+// ─── PRECIOS ─────────────────────────────────────────────────────
 router.get('/precios/:productoId', async (req, res) => {
   try {
     const result = await query(
@@ -120,21 +167,32 @@ router.get('/precios/:productoId', async (req, res) => {
 
 router.put('/precios', async (req, res) => {
   try {
-    const { producto_id, supermercado, precio, precio_anterior, descuento_porcentaje, disponible } = req.body;
+    const { producto_id, supermercado, precio, precio_anterior, descuento_porcentaje } = req.body;
+    if (!producto_id || !supermercado || precio === undefined || precio === null || precio === '') {
+      return res.status(400).json({ error: 'producto_id, supermercado y precio son requeridos' });
+    }
+    const precioNum = parseFloat(precio);
+    if (isNaN(precioNum) || precioNum <= 0) {
+      return res.status(400).json({ error: `Precio inválido: "${precio}"` });
+    }
+    const precioAnt = precio_anterior !== undefined && precio_anterior !== '' ? parseFloat(precio_anterior) : null;
+    const descPct = descuento_porcentaje !== undefined && descuento_porcentaje !== '' ? parseFloat(descuento_porcentaje) : null;
+
     const result = await query(
       `INSERT INTO precios (producto_id, supermercado, precio, precio_anterior, descuento_porcentaje, disponible, fuente)
-       VALUES ($1,$2,$3,$4,$5,$6,'admin')
+       VALUES ($1,$2,$3,$4,$5,true,'admin')
        ON CONFLICT (producto_id, supermercado) DO UPDATE SET
          precio=EXCLUDED.precio, precio_anterior=EXCLUDED.precio_anterior,
-         descuento_porcentaje=EXCLUDED.descuento_porcentaje, disponible=EXCLUDED.disponible,
+         descuento_porcentaje=EXCLUDED.descuento_porcentaje, disponible=true,
          fecha=NOW(), fuente='admin'
        RETURNING *`,
-      [producto_id, supermercado, precio, precio_anterior || null, descuento_porcentaje || null, disponible !== false]
+      [producto_id, supermercado, precioNum, precioAnt, descPct]
     );
-    await logAction(req.userId, 'UPDATE_PRECIO', 'precio', producto_id, { supermercado, precio });
+    await logAction(req.userId, 'UPDATE_PRECIO', 'precio', producto_id, { supermercado, precio: precioNum });
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: 'Error al actualizar precio' });
+    logger.error('Error precio:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -147,20 +205,21 @@ router.delete('/precios/:productoId/:supermercado', async (req, res) => {
   }
 });
 
-// ─── USUARIOS ──────────────────────────────────────────────────────
+// ─── USUARIOS ────────────────────────────────────────────────────
 router.get('/usuarios', async (req, res) => {
   try {
     const { page = 1, limit = 20, q } = req.query;
-    const offset = (page - 1) * limit;
-    let sql = `SELECT id, email, nombre, puntos, nivel, role, created_at,
-      (SELECT COUNT(*) FROM contribuciones WHERE usuario_id = u.id) as contribuciones
-      FROM users u`;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
     const params = [];
-    if (q) { sql += ` WHERE nombre ILIKE $1 OR email ILIKE $1`; params.push(`%${q}%`); }
-    sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    let where = '';
+    if (q) { where = 'WHERE nombre ILIKE $1 OR email ILIKE $1'; params.push(`%${q}%`); }
+    const sql = `SELECT id, email, nombre, puntos, nivel, role, created_at,
+      (SELECT COUNT(*) FROM contribuciones WHERE usuario_id = u.id) as contribuciones
+      FROM users u ${where}
+      ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(parseInt(limit), offset);
     const result = await query(sql, params);
-    const countRes = await query(`SELECT COUNT(*) FROM users${q ? ' WHERE nombre ILIKE $1 OR email ILIKE $1' : ''}`, q ? [`%${q}%`] : []);
+    const countRes = await query(`SELECT COUNT(*) FROM users ${where}`, params.slice(0, -2));
     res.json({ data: result.rows, total: parseInt(countRes.rows[0].count) });
   } catch (err) {
     res.status(500).json({ error: 'Error al obtener usuarios' });
@@ -217,21 +276,7 @@ router.delete('/usuarios/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
-// ─── LOGS ──────────────────────────────────────────────────────────
-router.get('/logs', async (req, res) => {
-  try {
-    const result = await query(
-      `SELECT l.*, u.nombre as admin_nombre FROM admin_logs l
-       LEFT JOIN users u ON u.id = l.admin_id
-       ORDER BY l.created_at DESC LIMIT 100`
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: 'Error al obtener logs' });
-  }
-});
-
-// ─── CONTRIBUCIONES (moderar) ──────────────────────────────────────
+// ─── CONTRIBUCIONES ──────────────────────────────────────────────
 router.get('/contribuciones', async (req, res) => {
   try {
     const result = await query(
@@ -253,6 +298,20 @@ router.delete('/contribuciones/:id', async (req, res) => {
     res.json({ mensaje: 'Contribución eliminada' });
   } catch (err) {
     res.status(500).json({ error: 'Error al eliminar contribución' });
+  }
+});
+
+// ─── LOGS ────────────────────────────────────────────────────────
+router.get('/logs', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT l.*, u.nombre as admin_nombre FROM admin_logs l
+       LEFT JOIN users u ON u.id = l.admin_id
+       ORDER BY l.created_at DESC LIMIT 100`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener logs' });
   }
 });
 
