@@ -1,6 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useCartStore, useAuthStore } from '../store';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { alertsAPI, authAPI } from '../services/api';
 
 const SUPERMERCADO_COLORES = {
   supermaxi: '#E31837', megamaxi: '#E31837', aki: '#FF6B00', tia: '#00529B'
@@ -8,10 +9,34 @@ const SUPERMERCADO_COLORES = {
 
 export default function Layout() {
   const cartItems = useCartStore(s => s.items);
-  const { user, logout } = useAuthStore();
+  const { user, logout, token, updateUser } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [notifCount, setNotifCount] = useState(0);
+
+  const refreshData = () => {
+    if (!token) return;
+    authAPI.me()
+      .then(r => updateUser({ puntos: r.data.puntos, nivel: r.data.nivel }))
+      .catch(() => {});
+    alertsAPI.getNotificaciones()
+      .then(r => setNotifCount(r.data.filter(n => !n.leida).length))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    if (!token) return;
+    refreshData();
+    // Auto-refresh points every 30 seconds
+    const interval = setInterval(refreshData, 30000);
+    // Also refresh when window gets focus (e.g. user comes back to tab)
+    window.addEventListener('focus', refreshData);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', refreshData);
+    };
+  }, [token]);
 
   const totalItems = cartItems.reduce((a, i) => a + i.cantidad, 0);
 
@@ -63,6 +88,21 @@ export default function Layout() {
               </Link>
             ))}
           </div>
+
+          {/* Notification bell */}
+          {user && (
+            <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => navigate('/perfil')}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--gris-400)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              {notifCount > 0 && (
+                <div style={{ position: 'absolute', top: -4, right: -4, width: 16, height: 16, borderRadius: '50%', background: 'var(--rojo)', color: '#fff', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {notifCount > 9 ? '9+' : notifCount}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Auth */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

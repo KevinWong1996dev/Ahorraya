@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useCartStore } from '../store';
 import { cartAPI } from '../services/api';
 
-const SUP_COLORS = { supermaxi: '#E31837', megamaxi: '#C01028', aki: '#FF6B00', tia: '#00529B' };
-const SUP_LABELS = { supermaxi: 'Supermaxi', megamaxi: 'Megamaxi', aki: 'Akí', tia: 'Tía' };
-const SUP_EMOJI = { supermaxi: '🏪', megamaxi: '🏬', aki: '🛒', tia: '🛍️' };
+const SUP_COLORS = { supermaxi: '#0057A8', megamaxi: '#E31837', aki: '#FF6B00', tia: '#00529B' };
+const SUP_LABELS = { supermaxi: 'Mi Comisariato', megamaxi: 'Megamaxi', aki: 'Akí', tia: 'Tía' };
+const SUP_EMOJI = { tia: '🛍️', aki: '🛒', megamaxi: '🏬', supermaxi: '🏪' };
 
 export default function Cart() {
   const navigate = useNavigate();

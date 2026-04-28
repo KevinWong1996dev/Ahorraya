@@ -51,3 +51,43 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
+
+// GET /api/alerts/notificaciones - notificaciones del usuario
+router.get('/notificaciones', authenticateToken, async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT n.*, p.nombre as producto_nombre
+      FROM notificaciones n
+      JOIN productos p ON p.id = n.producto_id
+      WHERE n.usuario_id = $1
+      ORDER BY n.created_at DESC
+      LIMIT 20
+    `, [req.userId]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener notificaciones' });
+  }
+});
+
+// PUT /api/alerts/notificaciones/:id/leer - marcar UNA como leída
+router.put('/notificaciones/:notifId/leer', authenticateToken, async (req, res) => {
+  try {
+    await query(
+      `UPDATE notificaciones SET leida = true WHERE id = $1 AND usuario_id = $2`,
+      [req.params.notifId, req.userId]
+    );
+    res.json({ mensaje: 'Notificación marcada como leída' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error' });
+  }
+});
+
+// PUT /api/alerts/notificaciones/leer - marcar todas como leídas
+router.put('/notificaciones/leer', authenticateToken, async (req, res) => {
+  try {
+    await query(`UPDATE notificaciones SET leida = true WHERE usuario_id = $1`, [req.userId]);
+    res.json({ mensaje: 'Notificaciones marcadas como leídas' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error' });
+  }
+});

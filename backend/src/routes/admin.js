@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const { query } = require('../database/db');
 const { authenticateToken, requireAdmin, requireSuperAdmin } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { verificarAlertas } = require('../services/notificaciones');
 
 router.use(authenticateToken, requireAdmin);
 
@@ -189,7 +190,9 @@ router.put('/precios', async (req, res) => {
       [producto_id, supermercado, precioNum, precioAnt, descPct]
     );
     await logAction(req.userId, 'UPDATE_PRECIO', 'precio', producto_id, { supermercado, precio: precioNum });
-    res.json(result.rows[0]);
+    // Verificar alertas de usuarios en background
+    const alertasDisparadas = await verificarAlertas(producto_id, supermercado, precioNum);
+    res.json({ ...result.rows[0], alertas_disparadas: alertasDisparadas.length });
   } catch (err) {
     logger.error('Error precio:', err.message);
     res.status(500).json({ error: err.message });
@@ -277,6 +280,26 @@ router.delete('/usuarios/:id', requireSuperAdmin, async (req, res) => {
 });
 
 // ─── CONTRIBUCIONES ──────────────────────────────────────────────
+// IMPORTANT: static routes BEFORE :id param routes to avoid Express confusion
+
+// GET /contribuciones/pendientes — MUST be before /:id
+router.get('/contribuciones/pendientes', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT c.*, p.nombre as producto_nombre, u.nombre as usuario_nombre
+       FROM contribuciones c
+       JOIN productos p ON p.id = c.producto_id
+       LEFT JOIN users u ON u.id = c.usuario_id
+       WHERE c.validado = false
+       ORDER BY c.created_at DESC LIMIT 50`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener pendientes' });
+  }
+});
+
+// GET /contribuciones — all
 router.get('/contribuciones', async (req, res) => {
   try {
     const result = await query(
@@ -292,12 +315,84 @@ router.get('/contribuciones', async (req, res) => {
   }
 });
 
+// PUT /contribuciones/:id/aprobar
+router.put('/contribuciones/:id/aprobar', async (req, res) => {
+  try {
+    const contrib = await query(
+      `UPDATE contribuciones SET validado = true WHERE id = $1
+       RETURNING producto_id, supermercado, precio, usuario_id`,
+      [req.params.id]
+    );
+    if (contrib.rows.length === 0) return res.status(404).json({ error: 'No encontrada' });
+    const { producto_id, supermercado, precio, usuario_id } = contrib.rows[0];
+
+    // Actualizar precio en tabla pública
+    await query(
+      `INSERT INTO precios (producto_id, supermercado, precio, disponible, fuente)
+       VALUES ($1,$2,$3,true,'crowdsourcing')
+       ON CONFLICT (producto_id, supermercado) DO UPDATE SET
+         precio=EXCLUDED.precio, fecha=NOW(), fuente='crowdsourcing', disponible=true`,
+      [producto_id, supermercado, precio]
+    );
+
+    // Puntos + notificación al usuario
+    if (usuario_id) {
+      await query('UPDATE users SET puntos = puntos + 5 WHERE id = $1', [usuario_id]);
+      const prod = await query('SELECT nombre FROM productos WHERE id = $1', [producto_id]);
+      const nombreProducto = prod.rows[0]?.nombre || 'producto';
+      try {
+        await query(
+          `INSERT INTO notificaciones (usuario_id, producto_id, tipo, mensaje, precio_nuevo)
+           VALUES ($1,$2,'contribucion_aprobada',$3,$4)`,
+          [usuario_id, producto_id,
+           `✅ Tu precio de ${nombreProducto} en ${supermercado} fue aprobado. ¡Ganaste 5 puntos!`,
+           precio]
+        );
+      } catch(e) {} // notificaciones table may not exist yet
+    }
+
+    await logAction(req.userId, 'APROBAR_CONTRIB', 'contribucion', req.params.id, { supermercado, precio });
+    res.json({ mensaje: 'Contribución aprobada y precio actualizado' });
+  } catch (err) {
+    logger.error('Error aprobar:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /contribuciones/:id — rechazar/eliminar SOLO la contribución, no el producto
 router.delete('/contribuciones/:id', async (req, res) => {
   try {
-    await query('DELETE FROM contribuciones WHERE id = $1', [req.params.id]);
+    const { id } = req.params;
+    // Get user info before deleting for notification
+    const contrib = await query(
+      `SELECT c.usuario_id, c.producto_id, c.supermercado, p.nombre as producto_nombre
+       FROM contribuciones c
+       JOIN productos p ON p.id = c.producto_id
+       WHERE c.id = $1`,
+      [id]
+    );
+
+    await query('DELETE FROM contribuciones WHERE id = $1', [id]);
+
+    // Notificar al usuario que fue rechazado
+    if (contrib.rows.length > 0) {
+      const { usuario_id, producto_id, supermercado, producto_nombre } = contrib.rows[0];
+      if (usuario_id) {
+        try {
+          await query(
+            `INSERT INTO notificaciones (usuario_id, producto_id, tipo, mensaje)
+             VALUES ($1,$2,'contribucion_rechazada',$3)`,
+            [usuario_id, producto_id,
+             `❌ Tu precio de ${producto_nombre} en ${supermercado} fue rechazado. Asegúrate de adjuntar una foto clara del precio.`]
+          );
+        } catch(e) {}
+      }
+    }
+
     res.json({ mensaje: 'Contribución eliminada' });
   } catch (err) {
-    res.status(500).json({ error: 'Error al eliminar contribución' });
+    logger.error('Error rechazar contrib:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

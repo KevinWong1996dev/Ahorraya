@@ -7,10 +7,10 @@ import FilterBar from '../components/FilterBar';
 
 const SUPERMERCADOS = [
   { id: '', label: 'Todos' },
-  { id: 'supermaxi', label: 'Supermaxi', color: '#E31837' },
-  { id: 'megamaxi', label: 'Megamaxi', color: '#E31837' },
+  { id: 'tia', label: 'Tía', color: '#E31837' },
   { id: 'aki', label: 'Akí', color: '#FF6B00' },
-  { id: 'tia', label: 'Tía', color: '#00529B' }
+  { id: 'megamaxi', label: 'Megamaxi', color: '#E31837' },
+  { id: 'supermaxi', label: 'Mi Comisariato', color: '#0057A8' },
 ];
 
 export default function Home() {
@@ -96,7 +96,7 @@ export default function Home() {
             <span style={{ color: 'var(--verde)' }}>compra del mes</span>
           </h1>
           <p style={{ color: 'var(--gris-600)', fontSize: 17, marginBottom: '1.5rem' }}>
-            Compara precios en Supermaxi, Akí, Tía y Megamaxi. Gratis.
+            Compara precios en Tía, Akí, Megamaxi y Mi Comisariato. Gratis.
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
             {SUPERMERCADOS.slice(1).map(s => (
@@ -118,7 +118,7 @@ export default function Home() {
           borderRadius: 'var(--radius-lg)', padding: '10px 16px',
           boxShadow: 'var(--shadow-sm)', transition: 'border-color var(--transition)'
         }}
-          onFocus={() => {}}>
+          onFocus={() => {}} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: query ? '2px solid var(--verde)' : '2px solid var(--gris-200)', borderRadius: 'var(--radius-lg)', padding: '10px 16px', boxShadow: 'var(--shadow-sm)' }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gris-400)" strokeWidth="2.5">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>

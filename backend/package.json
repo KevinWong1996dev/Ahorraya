@@ -12,7 +12,9 @@
     "db:migrate:admin": "node src/database/migrate_admin.js",
     "db:seed:admin": "node src/database/seed_admin.js",
     "db:migrate:categorias": "node src/database/migrate_categorias.js",
-    "db:fix": "node src/database/migrate_fix.js"
+    "db:fix": "node src/database/migrate_fix.js",
+    "db:migrate:notif": "node src/database/migrate_notificaciones.js",
+    "db:fix:peso": "node src/database/fix_seed_peso.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

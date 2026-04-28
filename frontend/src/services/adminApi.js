@@ -37,7 +37,11 @@ export const adminAPI = {
   deleteUsuario:      (id)      => api.delete(`/admin/usuarios/${id}`),
   // Contribuciones
   getContribuciones:  ()        => api.get('/admin/contribuciones'),
+  aprobarContribucion:(id)      => api.put(`/admin/contribuciones/${id}/aprobar`),
+  rechazarContribucion:(id)     => api.delete(`/admin/contribuciones/${id}`),
   deleteContribucion: (id)      => api.delete(`/admin/contribuciones/${id}`),
+  // Pendientes
+  getPendientes:      ()        => api.get('/admin/contribuciones/pendientes'),
   // Logs
   getLogs:            ()        => api.get('/admin/logs'),
 };

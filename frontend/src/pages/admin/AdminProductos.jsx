@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { adminAPI } from '../../services/adminApi';
+import ImageUploader from '../../components/admin/ImageUploader';
 
-const SUP_LABELS = { supermaxi: 'Supermaxi', megamaxi: 'Megamaxi', aki: 'Akí', tia: 'Tía' };
-const SUP_COLORS = { supermaxi: '#E31837', megamaxi: '#C01028', aki: '#FF6B00', tia: '#00529B' };
+const SUP_LABELS = { tia: 'Tía', aki: 'Akí', megamaxi: 'Megamaxi', supermaxi: 'Mi Comisariato' };
+const SUP_COLORS = { tia: '#00529B', aki: '#FF6B00', megamaxi: '#E31837', supermaxi: '#0057A8' };
 
 const UNIDADES = ['L','ml','kg','g','unidad','pack','par','docena','rollo','sobre','caja','funda','tarro','botella','bolsa'];
 
@@ -86,7 +87,8 @@ export default function AdminProductos() {
     setEditingId(p.id); setForm(p);
     const res = await adminAPI.getPrecios(p.id);
     const map = {};
-    res.data.forEach(r => { map[r.supermercado] = { ...r, enabled:true }; });
+    // precio_db guarda el precio actual en DB para usarlo como "anterior" al editar
+    res.data.forEach(r => { map[r.supermercado] = { ...r, enabled:true, precio_db: r.precio }; });
     setPreciosMap(map);
     setModal('precios');
   };
@@ -130,7 +132,15 @@ export default function AdminProductos() {
 
   const updatePrecio = (sup, field, val) => {
     setPreciosMap(prev => {
-      const updated = { ...prev, [sup]: { ...(prev[sup]||{}), [field]: val } };
+      const cur = prev[sup] || {};
+      const updated = { ...prev, [sup]: { ...cur, [field]: val } };
+      // Al cambiar precio actual, auto-rellenar precio_anterior con el precio que estaba en DB
+      if (field === 'precio' && cur.precio_db && !cur.precio_anterior_editado) {
+        updated[sup].precio_anterior = cur.precio_db;
+      }
+      if (field === 'precio_anterior') {
+        updated[sup].precio_anterior_editado = true; // el usuario lo cambió manualmente
+      }
       if (field === 'precio' || field === 'precio_anterior') {
         const p = parseFloat(field==='precio' ? val : updated[sup]?.precio);
         const pa = parseFloat(field==='precio_anterior' ? val : updated[sup]?.precio_anterior);
@@ -150,14 +160,22 @@ export default function AdminProductos() {
     const d = preciosMap[sup];
     if (!d?.precio) return;
     try {
-      await adminAPI.upsertPrecio({
+      const res = await adminAPI.upsertPrecio({
         producto_id: editingId,
         supermercado: sup,
         precio: parseFloat(d.precio),
         precio_anterior: d.precio_anterior ? parseFloat(d.precio_anterior) : null,
         descuento_porcentaje: d.descuento_porcentaje || null,
       });
-      setPreciosMap(prev => ({ ...prev, [sup]: { ...prev[sup], saved:true, fecha: new Date().toISOString() } }));
+      const nuevoPrecio = parseFloat(d.precio);
+      const alertas = res?.data?.alertas_disparadas || 0;
+      setPreciosMap(prev => ({ ...prev, [sup]: { ...prev[sup], saved:true, fecha: new Date().toISOString(), precio_db: nuevoPrecio, alertas } }));
+      // Actualizar precio_min en la tabla sin recargar todo
+      setProductos(prev => prev.map(p => {
+        if (p.id !== editingId) return p;
+        const precioMinActual = parseFloat(p.precio_min) || Infinity;
+        return { ...p, precio_min: Math.min(precioMinActual, nuevoPrecio).toFixed(2) };
+      }));
       setTimeout(() => setPreciosMap(prev => ({ ...prev, [sup]: { ...prev[sup], saved:false } })), 1500);
     } catch (err) {
       alert('Error: ' + (err.response?.data?.error || err.message));
@@ -217,7 +235,10 @@ export default function AdminProductos() {
                     }
                     <div>
                       <div style={{ fontWeight:600, fontSize:14, color:'#0f172a' }}>{p.nombre}</div>
-                      {p.codigo_barras && <div style={{ fontSize:11, color:'#94a3b8' }}>{p.codigo_barras}</div>}
+                      <div style={{ fontSize:11, color:'#94a3b8' }}>
+                        {p.peso_neto || p.unidad || '—'}
+                        {p.codigo_barras && ` · ${p.codigo_barras}`}
+                      </div>
                     </div>
                   </div>
                 </td>
@@ -288,13 +309,7 @@ export default function AdminProductos() {
 
             {/* Imagen */}
             <div style={{ gridColumn:'1/-1' }}>
-              <Field label="URL de imagen" value={form.imagen_url} onChange={v=>f('imagen_url',v)} placeholder="https://ejemplo.com/imagen.jpg" required />
-              {form.imagen_url && (
-                <div style={{ marginTop:8, display:'flex', alignItems:'center', gap:10 }}>
-                  <img src={form.imagen_url} alt="" style={{ width:56, height:56, objectFit:'cover', borderRadius:8, border:'1px solid #e2e8f0' }} onError={e=>e.target.style.display='none'} />
-                  <span style={{ fontSize:12, color:'#94a3b8' }}>Vista previa</span>
-                </div>
-              )}
+              <ImageUploader value={form.imagen_url} onChange={v=>f('imagen_url',v)} />
             </div>
 
             {/* Descripción */}
@@ -321,7 +336,7 @@ export default function AdminProductos() {
           <p style={{ fontSize:13, color:'#64748b', marginBottom:'1.25rem' }}>
             Activa los supermercados donde está disponible. El % de descuento se calcula automáticamente.
           </p>
-          {Object.keys(SUP_LABELS).map(sup => {
+          {['tia','aki','megamaxi','supermaxi'].map(sup => {
             const d = preciosMap[sup]||{};
             const enabled = !!(d.enabled||d.precio);
             const p = parseFloat(d.precio)||0;
@@ -372,10 +387,17 @@ export default function AdminProductos() {
                           {subio ? `▲ +${((p-pa)/pa*100).toFixed(1)}%` : bajo ? `▼ -${((pa-p)/pa*100).toFixed(1)}%` : '—'}
                         </div>
                       </div>
-                      <button onClick={()=>handleSavePrecio(sup)} disabled={!d.precio}
-                        style={{ padding:'7px 14px', borderRadius:7, background: d.saved?'#dcfce7':(!d.precio?'#e2e8f0':'#16a34a'), color: d.saved?'#16a34a':(!d.precio?'#94a3b8':'#fff'), fontSize:13, fontWeight:700, border:'none', cursor: d.precio?'pointer':'default', whiteSpace:'nowrap' }}>
-                        {d.saved?'✓':'Guardar'}
-                      </button>
+                      <div style={{ display:'flex', flexDirection:'column', gap:4, alignItems:'center' }}>
+                        <button onClick={()=>handleSavePrecio(sup)} disabled={!d.precio}
+                          style={{ padding:'7px 14px', borderRadius:7, background: d.saved?'#dcfce7':(!d.precio?'#e2e8f0':'#16a34a'), color: d.saved?'#16a34a':(!d.precio?'#94a3b8':'#fff'), fontSize:13, fontWeight:700, border:'none', cursor: d.precio?'pointer':'default', whiteSpace:'nowrap' }}>
+                          {d.saved?'✓':'Guardar'}
+                        </button>
+                        {d.saved && d.alertas > 0 && (
+                          <span style={{ fontSize:10, background:'#fef9c3', color:'#854d0e', borderRadius:99, padding:'2px 7px', fontWeight:700, whiteSpace:'nowrap' }}>
+                            🔔 {d.alertas} alerta{d.alertas>1?'s':''}
+                          </span>
+                        )}
+                      </div>
                       {d.fecha && (
                         <button onClick={()=>handleDeletePrecio(sup)} style={{ padding:'7px 10px', borderRadius:7, background:'#fef2f2', color:'#ef4444', fontSize:13, border:'none', cursor:'pointer' }}>🗑️</button>
                       )}

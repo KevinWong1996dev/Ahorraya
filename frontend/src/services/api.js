@@ -61,7 +61,9 @@ export const contributionsAPI = {
 export const alertsAPI = {
   getAll: () => api.get('/alerts'),
   create: (data) => api.post('/alerts', data),
-  delete: (id) => api.delete(`/alerts/${id}`)
+  delete: (id) => api.delete(`/alerts/${id}`),
+  getNotificaciones: () => api.get('/alerts/notificaciones'),
+  marcarLeidas: () => api.put('/alerts/notificaciones/leer'),
 };
 
 export const supermercadosAPI = {

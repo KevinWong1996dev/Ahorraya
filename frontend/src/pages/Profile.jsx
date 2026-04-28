@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authAPI, contributionsAPI, alertsAPI } from '../services/api';
+import api from '../services/api';
 import { useAuthStore } from '../store';
 
 const NIVELES = {
@@ -16,13 +17,14 @@ export default function Profile() {
   const [perfil, setPerfil] = useState(null);
   const [ranking, setRanking] = useState([]);
   const [alertas, setAlertas] = useState([]);
+  const [notifs, setNotifs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('ranking');
 
   useEffect(() => {
     if (!token) { navigate('/login'); return; }
-    Promise.all([authAPI.me(), contributionsAPI.ranking(), alertsAPI.getAll()])
-      .then(([me, rank, alert]) => { setPerfil(me.data); setRanking(rank.data); setAlertas(alert.data); })
+    Promise.all([authAPI.me(), contributionsAPI.ranking(), alertsAPI.getAll(), alertsAPI.getNotificaciones()])
+      .then(([me, rank, alert, notif]) => { setPerfil(me.data); setRanking(rank.data); setAlertas(alert.data); setNotifs(notif.data); })
       .finally(() => setLoading(false));
   }, [token, navigate]);
 
@@ -73,7 +75,7 @@ export default function Profile() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: '1rem', background: 'var(--gris-100)', borderRadius: 12, padding: 4 }}>
-        {[{ id: 'ranking', label: '🏆 Ranking' }, { id: 'alertas', label: `🔔 Alertas (${alertas.length})` }].map(t => (
+        {[{ id: 'ranking', label: '🏆 Ranking' }, { id: 'alertas', label: `🔔 Alertas (${alertas.length})` }, { id: 'notifs', label: `🛎️ Notificaciones${notifs.filter(n=>!n.leida).length > 0 ? ` (${notifs.filter(n=>!n.leida).length})` : ''}` }].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: '9px', borderRadius: 9, fontSize: 14, fontWeight: 600, background: tab === t.id ? '#fff' : 'transparent', color: tab === t.id ? 'var(--gris-800)' : 'var(--gris-400)', boxShadow: tab === t.id ? 'var(--shadow-sm)' : 'none', transition: 'all 0.15s' }}>{t.label}</button>
         ))}
       </div>
@@ -125,6 +127,47 @@ export default function Profile() {
                 style={{ background: 'var(--rojo-claro)', color: 'var(--rojo)', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                 Eliminar
               </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Notificaciones */}
+      {tab === 'notifs' && (
+        <div style={{ background: '#fff', borderRadius: 'var(--radius-lg)', border: '1px solid var(--gris-200)', overflow: 'hidden' }}>
+          {notifs.filter(n=>!n.leida).length > 0 && (
+            <div style={{ padding: '10px 1.25rem', borderBottom: '1px solid var(--gris-100)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={async () => { await alertsAPI.marcarLeidas(); setNotifs(p => p.map(n=>({...n,leida:true}))); }}
+                style={{ fontSize: 12, color: 'var(--azul)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                Marcar todas como leídas
+              </button>
+            </div>
+          )}
+          {notifs.length === 0 ? (
+            <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--gris-400)' }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>🛎️</div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Sin notificaciones</div>
+              <div style={{ fontSize: 14 }}>Te avisaremos cuando bajen los precios de tus alertas</div>
+            </div>
+          ) : notifs.map((n, i) => (
+            <div key={n.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '13px 1.25rem', borderBottom: i < notifs.length - 1 ? '1px solid var(--gris-100)' : 'none', background: n.leida ? 'transparent' : 'var(--verde-claro)', transition: 'background 0.3s' }}>
+              <span style={{ fontSize: 22, flexShrink: 0 }}>🔔</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: n.leida ? 400 : 600, fontSize: 14, color: 'var(--gris-800)', marginBottom: 3 }}>{n.mensaje}</div>
+                <div style={{ fontSize: 12, color: 'var(--gris-400)' }}>
+                  {new Date(n.created_at).toLocaleString('es-EC', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+              {!n.leida && (
+                <button
+                  onClick={async () => {
+                    await api.put(`/alerts/notificaciones/${n.id}/leer`).catch(()=>{});
+                    setNotifs(prev => prev.map(x => x.id === n.id ? {...x, leida: true} : x));
+                  }}
+                  style={{ fontSize: 11, color: 'var(--verde)', background: 'none', border: '1px solid var(--verde)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                  Leído ✓
+                </button>
+              )}
             </div>
           ))}
         </div>
